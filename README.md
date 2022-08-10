@@ -1,5 +1,5 @@
 # OneFileEazySFMLSnake
-OneFileEazySFMLSnake
+Змейка на с++ с помощью SFML в одном файле, предположительно простая
 
 Люблю кушать арбуз
 
