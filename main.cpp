@@ -6,7 +6,6 @@
 #include <iostream>
 #include <cassert>
 
-const sf::Time TimePerFrame = sf::seconds(1.f / 60.f);
 
 namespace Cells
 {
@@ -18,7 +17,6 @@ namespace Cells
 		Apple,
 		SnakeSegment,
 		SnakeHead,
-		TitleScreen,
 	};
 }
 namespace Audios
@@ -54,16 +52,6 @@ namespace Action
 		Up, Down, Left, Right, Wait
 	};
 }
-namespace States
-{
-	enum ID
-	{
-		None,
-		Game, 
-		Menu,
-	};
-}
-
 
 template <typename Resource, typename Identifier>
 class ResourceHolder
@@ -228,295 +216,6 @@ private:
 	std::vector<std::vector<Cell*>>		Map;
 };
 
-class StateStack; //для StateStack* mStack;
-class State
-{
-public:
-	typedef std::unique_ptr<State> Ptr;
-
-public:
-				 State(StateStack& stack, Cell::Context context)
-		: mStack(&stack)
-		, mContext(context)
-	{
-	}
-				 //State();
-	virtual		 ~State()
-	{
-	}
-	virtual void draw() = 0;
-	virtual bool update(sf::Time dt) = 0;
-	virtual bool handleEvent(const sf::Event& event) = 0;
-
-	template<typename SomethingSF>
-	void centerOrigin(SomethingSF& somethingSF)
-	{
-		sf::FloatRect bounds = somethingSF.getLocalBounds();
-		somethingSF.setOrigin(std::floor(bounds.left + bounds.width / 2.f), std::floor(bounds.top + bounds.height / 2.f));
-	}
-
-protected:
-	void			requestStackPush(States::ID stateID);
-	void			requestStackPop();
-	void			requestStateClear();
-	Cell::Context	getContext() const
-	{
-		return mContext;
-	}
-private:
-	StateStack*			mStack;
-	Cell::Context		mContext;
-};
-class StateStack : private sf::NonCopyable
-{
-public:
-	enum Action
-	{
-		Push,
-		Pop,
-		Clear,
-	};
-public:
-	explicit StateStack(Cell::Context context)
-		: mStack()
-		, mPendingList()
-		, mContext(context)
-		, mFactories()
-	{
-	}
-	explicit StateStack()
-	{
-	}
-
-	template <typename T>
-	void registerState(States::ID stateID)
-	{
-		mFactories[stateID] = [this]() {return State::Ptr(new T(*this, mContext)); };
-	}
-
-	void update(sf::Time dt)
-	{
-		for (auto itr = mStack.rbegin(); itr != mStack.rend(); ++itr)
-		{
-			if (!(*itr)->update(dt))
-				break;
-		}
-		applyPendingChanges();
-	}
-	void draw()
-	{
-		for (auto& state : mStack)
-		{
-			state->draw();
-		}
-	}
-
-	void handleEvent(const sf::Event& event)
-	{
-		for (auto itr = mStack.rbegin(); itr != mStack.rend(); ++itr)
-		{
-			if (!(*itr)->handleEvent(event)) 
-				return;
-		}
-		applyPendingChanges();
-	}
-
-	void pushState(States::ID stateID)
-	{
-		mPendingList.push_back(PendingChange(Push, stateID));
-	}
-	void popState()
-	{
-		mPendingList.push_back(PendingChange(Pop));
-	}
-	void clearStates()
-	{
-		mPendingList.push_back(PendingChange(Clear));
-	}
-	bool isEmpty() const
-	{
-		return mStack.empty();
-	}
-
-private:
-	State::Ptr createState(States::ID stateID)
-	{
-		auto found = mFactories.find(stateID);
-		assert(found != mFactories.end());
-		return found->second();
-	}
-	void applyPendingChanges()
-	{
-		for (PendingChange change : mPendingList)
-		{
-			switch (change.action)
-			{
-			case Push:
-				mStack.push_back(createState(change.stateID));
-				break;
-			case Pop:
-				mStack.pop_back();
-				break;
-			case Clear:
-				mStack.clear();
-				break;
-			default:
-				break;
-			}
-			mPendingList.clear();
-		}
-	}
-private:
-	struct PendingChange
-	{
-		explicit PendingChange(Action action, States::ID stateID = States::None)
-			: action(action)
-			, stateID(stateID)
-		{
-		}
-		Action action;
-		States::ID stateID;
-	};
-private:
-	std::vector<State::Ptr> mStack;
-	std::vector<PendingChange> mPendingList;
-	Cell::Context mContext;
-	std::map<States::ID, std::function<State::Ptr()>> mFactories;
-};
-void			State::requestStackPush(States::ID stateID)
-{
-	mStack->pushState(stateID);
-}
-void			State::requestStackPop()
-{
-	mStack->popState();
-}
-void			State::requestStateClear()
-{
-	mStack->clearStates();
-}
-
-
-//class GameState : public State
-//{
-//public:
-//	GameState(StateStack& stack, Cell::Context context): State(stack, context){}
-//	virtual void draw(){}
-//	virtual bool update(sf::Time dt) { return true; }
-//	virtual bool handleEvent(const sf::Event& event){ return true; }
-//
-//private:/*
-//	World					mWorld;
-//	Player					mPlayer;*/
-//};
-
-class MenuState : public State
-{
-public:
-	MenuState(StateStack& stack, Cell::Context context)
-		: State(stack, context)
-		, mOptions()
-		, mOptionIndex(0)
-	{
-		sf::Texture texture = context.textures->get(Cells::TitleScreen);
-		//sf::Font font = context.fonts->get(Fonts::Main);
-
-		sf::Text playOption;
-		//playOption.setFont(font);
-		playOption.setString("Play");
-		centerOrigin(playOption);
-		sf::Vector2f pos = context.window->getView().getSize() / 2.f;
-		playOption.setPosition(pos);
-		mOptions.push_back(playOption);
-		mOptions[0].setFillColor(sf::Color::Red);
-
-		playOption.setString("Exit");
-		centerOrigin(playOption);
-		pos.y += (playOption.getLocalBounds().height + 2.f);
-		playOption.setPosition(pos);
-		mOptions.push_back(playOption);
-
-		playOption.setString("BOOK, PLEASE, STOP!");
-		centerOrigin(playOption);
-		pos.y += (playOption.getLocalBounds().height + 2.f);
-		playOption.setPosition(pos);
-		mOptions.push_back(playOption);
-	}
-
-	virtual void draw()
-	{
-		sf::RenderWindow& window = *getContext().window;
-
-		window.setView(window.getDefaultView());
-		window.draw(mBackgroundSprite);
-
-		for (auto& text : mOptions)
-			window.draw(text);
-	}
-	virtual bool update(sf::Time dt)
-	{
-		return true;
-	}
-	virtual bool handleEvent(const sf::Event& event)
-	{
-		if (event.type != sf::Event::KeyPressed)
-			return false;
-
-		if (event.key.code == sf::Keyboard::Up)
-		{
-			if (mOptionIndex > 0)
-				mOptionIndex--;
-			else
-				mOptionIndex = mOptions.size() - 1;
-			updateOptionText();
-		}
-		else if (event.key.code == sf::Keyboard::Down)
-		{
-			if (mOptionIndex < mOptions.size() - 1)
-				mOptionIndex++;
-			else
-				mOptionIndex = 0;
-		}
-		updateOptionText();
-
-		if (event.key.code == sf::Keyboard::Enter)
-			if (mOptionIndex == Play) //Play в enum, то есть число, а значит индекс и Play можно сравнить
-			{
-				requestStackPop();
-				requestStackPush(States::Game);
-			}
-			else if (mOptionIndex == Exit)
-			{
-				requestStackPop(); //так как в стэке не будет никаких состояний. то и игра закроется ибо это проверят в Application в run()
-			}
-			else if (mOptionIndex == BOOK_PLEASE_STOP)
-			{
-				std::cout << "Book, please, STOP!" << std::endl;
-			}
-	}
-
-	void updateOptionText()
-	{
-		if (mOptions.empty())
-			return;
-
-		for (sf::Text& text : mOptions)
-			text.setFillColor(sf::Color::White);
-
-		mOptions[mOptionIndex].setFillColor(sf::Color::Red);
-	}
-
-private:
-	enum OptionNames
-	{
-		Play, Exit, BOOK_PLEASE_STOP
-	};
-	sf::Sprite mBackgroundSprite;
-	std::vector<sf::Text> mOptions;
-	std::size_t mOptionIndex;
-};
-
-
 
 class Game //Application, потом когда буду добавлять меню изменю
 {
@@ -525,104 +224,74 @@ public:
 		: mWindow(sf::VideoMode(800, 800), "OneFileSFMLSnake")
 		, mTextures()
 		, mContext(mWindow, 25, mTextures, mSound) //пока так
-		, mStateStack(mContext)
 		, mapManager(mContext)
 		, direct(Action::Right)
-		, mSpeed(0.5)
 	{
 		addTexture();
 		mapManager.create();
 		doSomething(Action::SpawnSnake);
 		doSomething(Action::SpawnApple);
-
-		mTextures.load(Cells::TitleScreen, "Textures/TitleScreen.png");
-
-		registerStates(); //регистрация состояний, очевидно жи, кхем
-		mStateStack.pushState(States::Menu);
 	}
 
 	void run()
 	{
 		sf::Clock clock;
-		sf::Time timeSinceLastUpdate = sf::Time::Zero;
+		float speed = 0.5;
+
+
+
+		render();
 
 		while (mWindow.isOpen())
 		{
-			sf::Time dt = clock.restart();
-			timeSinceLastUpdate += dt;
-			while (timeSinceLastUpdate > TimePerFrame)
+			sf::Event event;
+			while (mWindow.pollEvent(event))
 			{
-				timeSinceLastUpdate -= TimePerFrame;
-
-				progressInput();
-				update(TimePerFrame);
-
-				if (mStateStack.isEmpty())
+				if (event.type == sf::Event::Closed)
+					mWindow.close();
+				if (event.key.code == sf::Keyboard::Escape)
 					mWindow.close();
 			}
-			
-			render();
+
+			if (clock.getElapsedTime().asSeconds() >= speed)
+			{
+				if (event.key.code == sf::Keyboard::A && direct != Action::Right)
+					direct = Action::Left;
+				else if (event.key.code == sf::Keyboard::D && direct != Action::Left)
+					direct = Action::Right;
+				else if (event.key.code == sf::Keyboard::W && direct != Action::Down)
+					direct = Action::Up;
+				else if (event.key.code == sf::Keyboard::S && direct != Action::Up)
+					direct = Action::Down;
+
+
+				update();
+				render();
+
+				clock.restart();
+			}
 		}
 	}
 
-	void update(sf::Time dt)
+
+
+	void update()
 	{
-		mStateStack.update(dt);
+		doSomething(Action::StandartMove);
 	}
-
-	//bool update(sf::Event event, sf::Clock& clock)
-	//{
-
-	//		if (event.key.code == sf::Keyboard::A && direct != Action::Right)
-	//			direct = Action::Left;
-	//		else if (event.key.code == sf::Keyboard::D && direct != Action::Left)
-	//			direct = Action::Right;
-	//		else if (event.key.code == sf::Keyboard::W && direct != Action::Down)
-	//			direct = Action::Up;
-	//		else if (event.key.code == sf::Keyboard::S && direct != Action::Up)
-	//			direct = Action::Down;
-	//	if (clock.getElapsedTime().asSeconds() >= mSpeed)
-	//	{
-	//		doSomething(Action::StandartMove);
-	//		clock.restart();
-	//	}
-	//	return true;
-	//}
 	void draw()
 	{
 		mapManager.draw(mSnake);
 	}
 private:
-	void progressInput()
-	{
-		sf::Event event;
-		while (mWindow.pollEvent(event))
-		{
-			mStateStack.handleEvent(event);
 
-			if (event.type == sf::Event::Closed)
-				mWindow.close();
-			else if (event.key.code == sf::Keyboard::Tilde)
-				mWindow.close();
-		}
-	}
-	void registerStates()
-	{
-		mStateStack.registerState<MenuState>(States::Menu);
-		//mStateStack.registerState<GameState>(States::Game);
-	}
-	//void render()
-	//{
-	//	mWindow.clear();
-	//	draw();
-	//	mWindow.display();
-	//}
+
+
 
 	void render()
 	{
 		mWindow.clear();
-		mStateStack.draw();
-		mWindow.setView(mWindow.getDefaultView());
+		draw();
 		mWindow.display();
 	}
 
@@ -769,11 +438,7 @@ private:
 	TextureHolder mTextures;
 	SoundHolder mSound;
 	Cell::Context mContext;
-	StateStack	mStateStack;
 	std::map<Audios::ID, sf::Sound> shortSound;
-	//
-	float mSpeed;
-	//
 };
 
 int main()
